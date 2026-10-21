@@ -237,6 +237,15 @@ describe("ValkeyResumableStreamStore — factory", () => {
     expect(activeSetCall).toHaveLength(2);
   });
 
+  it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects ttlSeconds=%s at creation",
+    async (ttlSeconds) => {
+      await expect(
+        createResumableStreamValkeyStore({ ...makeOptions(), ttlSeconds } as any),
+      ).rejects.toThrow("ttlSeconds must be a positive integer");
+    },
+  );
+
   it("getActiveStreamId returns stored stream ID", async () => {
     const client = makeGlideClient();
     client.get.mockResolvedValue("stream-123");

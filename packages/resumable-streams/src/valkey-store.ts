@@ -38,7 +38,7 @@ export interface ResumableStreamValkeyStoreOptions {
   clientConfig: ValkeyConnectionConfig;
   /** Key prefix for all Valkey keys managed by this store. Defaults to `"resumable-stream"`. */
   keyPrefix?: string;
-  /** Optional TTL in seconds applied to active-stream keys. Must be a positive finite number. */
+  /** Optional TTL in seconds applied to active-stream keys. Must be a positive integer. */
   // Applied to active stream keys only; stream data keys are managed by resumable-stream/generic
   ttlSeconds?: number;
   /**
@@ -72,7 +72,7 @@ export type ValkeyResumableStreamStore = ResumableStreamStore &
  *   config, optional key prefix, TTL, and subscription limits.
  * @returns A {@link ValkeyResumableStreamStore} ready for use.
  * @throws If `@valkey/valkey-glide` is not installed or is an incompatible version.
- * @throws If `ttlSeconds` is provided but is not a positive finite number.
+ * @throws If `ttlSeconds` is provided but is not a positive integer.
  */
 export async function createResumableStreamValkeyStore(
   options: ResumableStreamValkeyStoreOptions,
@@ -109,9 +109,9 @@ export async function createResumableStreamValkeyStore(
 
   if (
     options.ttlSeconds !== undefined &&
-    (!Number.isFinite(options.ttlSeconds) || options.ttlSeconds <= 0)
+    (!Number.isInteger(options.ttlSeconds) || options.ttlSeconds <= 0)
   ) {
-    throw new Error("ttlSeconds must be a positive finite number");
+    throw new Error("ttlSeconds must be a positive integer");
   }
 
   // Publisher adapter
