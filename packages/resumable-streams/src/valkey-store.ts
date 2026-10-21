@@ -9,6 +9,7 @@ import type { ResumableStreamActiveStore, ResumableStreamStore } from "./types";
 
 const DEFAULT_KEY_PREFIX = "resumable-stream";
 const DEFAULT_CLIENT_INFO_TAG = "voltagent";
+const SUBSCRIBE_TIMEOUT_MS = 5000;
 
 /**
  * Connection configuration passed to the Valkey GLIDE client.
@@ -22,7 +23,7 @@ export interface ValkeyConnectionConfig {
   useTLS?: boolean;
   requestTimeout?: number;
   clientName?: string;
-  /** Library-name tag sent via `CLIENT SETINFO LIB-NAME`. Defaults to `"voltagent"` on subscription clients. */
+  /** Library-name tag sent via `CLIENT SETINFO LIB-NAME`. Defaults to `"voltagent"` on the subscriber client. */
   clientInfoTag?: string;
   [key: string]: unknown;
 }
@@ -34,7 +35,7 @@ export interface ValkeyConnectionConfig {
 export interface ResumableStreamValkeyStoreOptions {
   /** Valkey client instance (standalone {@link GlideClient} or {@link GlideClusterClient}). */
   client: GlideClient | GlideClusterClient;
-  /** Connection config reused when creating per-channel subscription clients. */
+  /** Connection config reused when creating the shared pub/sub subscriber client. */
   clientConfig: ValkeyConnectionConfig;
   /** Key prefix for all Valkey keys managed by this store. Defaults to `"resumable-stream"`. */
   keyPrefix?: string;
@@ -42,9 +43,8 @@ export interface ResumableStreamValkeyStoreOptions {
   // Applied to active stream keys only; stream data keys are managed by resumable-stream/generic
   ttlSeconds?: number;
   /**
-   * Maximum number of concurrent subscription channels. Each subscription creates a
-   * dedicated GlideClient TCP connection (required by the Glide pub/sub model), so this
-   * also caps the number of open connections. Defaults to 1000.
+   * Maximum number of concurrent subscription channels. All channels share one subscriber
+   * connection. Defaults to 1000.
    */
   maxSubscriptions?: number;
   /** Optional callback (e.g. from a serverless runtime) to keep the process alive while background work completes. */
@@ -65,39 +65,26 @@ export type ValkeyResumableStreamStore = ResumableStreamStore &
  *
  * The returned store uses the provided {@link GlideClient} (or
  * {@link GlideClusterClient}) for key-value and pub/sub operations required by
- * the `resumable-stream/generic` library. Each pub/sub subscription creates a
- * dedicated GLIDE client connection (required by the GLIDE pub/sub model).
+ * the `resumable-stream/generic` library. Pub/sub subscriptions share one
+ * dedicated subscriber client, created on first use.
  *
  * @param options - Store configuration including the Valkey client, connection
  *   config, optional key prefix, TTL, and subscription limits.
  * @returns A {@link ValkeyResumableStreamStore} ready for use.
- * @throws If `@valkey/valkey-glide` is not installed or is an incompatible version.
+ * @throws If `@valkey/valkey-glide` is not installed.
  * @throws If `ttlSeconds` is provided but is not a positive integer.
  */
 export async function createResumableStreamValkeyStore(
   options: ResumableStreamValkeyStoreOptions,
 ): Promise<ValkeyResumableStreamStore> {
   let GlideClientClass: typeof GlideClient;
-  let GlideClientConfigurationClass: { PubSubChannelModes: { Exact: number } };
   let timeUnit: typeof TimeUnit;
 
   try {
     const mod = await import("@valkey/valkey-glide");
     GlideClientClass = mod.GlideClient;
-    // PubSubChannelModes isn't exported as a value type; use a single guarded access.
-    const PubSubExact = (mod as any).GlideClientConfiguration?.PubSubChannelModes?.Exact;
-    if (PubSubExact === undefined) {
-      throw new Error(
-        "GlideClientConfiguration.PubSubChannelModes.Exact is not available. " +
-          "The installed version of @valkey/valkey-glide may be incompatible.",
-      );
-    }
-    GlideClientConfigurationClass = { PubSubChannelModes: { Exact: PubSubExact } };
     timeUnit = mod.TimeUnit;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("PubSubChannelModes")) {
-      throw err;
-    }
+  } catch {
     throw new Error(
       "@valkey/valkey-glide is required for createResumableStreamValkeyStore. " +
         "Install it with: pnpm add @valkey/valkey-glide",
@@ -140,8 +127,8 @@ export async function createResumableStreamValkeyStore(
     },
   };
 
-  // Subscriber adapter — one dedicated client per channel (Glide pub/sub requirement).
-  // Detect whether the caller provided a cluster client so subscription clients match.
+  // Subscriber adapter — one shared pub/sub client; channels are added and removed at runtime.
+  // Detect whether the caller provided a cluster client so the subscriber client matches.
   let GlideClusterClientClass: typeof GlideClusterClient | undefined;
   try {
     const mod = await import("@valkey/valkey-glide");
@@ -153,69 +140,54 @@ export async function createResumableStreamValkeyStore(
     GlideClusterClientClass !== undefined && client instanceof GlideClusterClientClass;
 
   const maxSubscriptions = options.maxSubscriptions ?? 1000;
-  const subscriptionClients = new Map<string, GlideClient | GlideClusterClient>();
-  // Guard against concurrent subscribe calls interleaving across awaits.
-  const pendingSubscriptions = new Set<string>();
-  // Pending channels cancelled by unsubscribe() or close() before their client was created.
-  const cancelledSubscriptions = new Set<string>();
+  const channelCallbacks = new Map<string, (message: string) => void>();
+  let subscriberClient: Promise<GlideClient | GlideClusterClient> | null = null;
+
+  const getSubscriberClient = () => {
+    if (!subscriberClient) {
+      const config = {
+        ...clientConfig,
+        clientInfoTag: clientConfig.clientInfoTag ?? DEFAULT_CLIENT_INFO_TAG,
+        pubsubSubscriptions: {
+          channelsAndPatterns: {},
+          callback: (msg: { channel: unknown; message: unknown }) =>
+            channelCallbacks.get(String(msg.channel))?.(String(msg.message)),
+        },
+      };
+      const created =
+        isClusterMode && GlideClusterClientClass
+          ? GlideClusterClientClass.createClient(config)
+          : GlideClientClass.createClient(config);
+      subscriberClient = created;
+      created.catch(() => {
+        if (subscriberClient === created) subscriberClient = null;
+      });
+    }
+    return subscriberClient;
+  };
 
   const subscriber = {
     async connect() {},
     async subscribe(channel: string, callback: (message: string) => void) {
-      // Close any existing client for this channel to avoid resource leaks on duplicate calls
-      const existing = subscriptionClients.get(channel);
-      if (existing) {
-        existing.close();
-        subscriptionClients.delete(channel);
-      }
-
-      if (pendingSubscriptions.has(channel)) {
-        throw new Error(`A subscription for channel "${channel}" is already being established.`);
-      }
-
-      if (subscriptionClients.size + pendingSubscriptions.size >= maxSubscriptions) {
+      if (!channelCallbacks.has(channel) && channelCallbacks.size >= maxSubscriptions) {
         throw new Error(
           `Maximum subscription limit (${maxSubscriptions}) reached. Unsubscribe from existing channels before subscribing to new ones.`,
         );
       }
 
-      pendingSubscriptions.add(channel);
+      channelCallbacks.set(channel, callback);
       try {
-        const pubsubConfig = {
-          ...clientConfig,
-          clientInfoTag: clientConfig.clientInfoTag ?? DEFAULT_CLIENT_INFO_TAG,
-          pubsubSubscriptions: {
-            channelsAndPatterns: {
-              [GlideClientConfigurationClass.PubSubChannelModes.Exact]: new Set([channel]),
-            },
-            callback: (msg: { message: unknown }, _ctx: unknown) => callback(String(msg.message)),
-          },
-        };
-
-        const subClient =
-          isClusterMode && GlideClusterClientClass
-            ? await GlideClusterClientClass.createClient(pubsubConfig)
-            : await GlideClientClass.createClient(pubsubConfig);
-
-        if (cancelledSubscriptions.has(channel)) {
-          subClient.close();
-          return;
-        }
-        subscriptionClients.set(channel, subClient);
-      } finally {
-        pendingSubscriptions.delete(channel);
-        cancelledSubscriptions.delete(channel);
+        const subClient = await getSubscriberClient();
+        await subClient.subscribe(new Set([channel]), SUBSCRIBE_TIMEOUT_MS);
+      } catch (err) {
+        if (channelCallbacks.get(channel) === callback) channelCallbacks.delete(channel);
+        throw err;
       }
     },
     async unsubscribe(channel: string) {
-      if (pendingSubscriptions.has(channel)) {
-        cancelledSubscriptions.add(channel);
-      }
-      const subClient = subscriptionClients.get(channel);
-      if (subClient) {
-        subClient.close();
-        subscriptionClients.delete(channel);
-      }
+      if (!channelCallbacks.delete(channel) || !subscriberClient) return;
+      const subClient = await subscriberClient;
+      await subClient.unsubscribe(new Set([channel]), SUBSCRIBE_TIMEOUT_MS);
     },
   };
 
@@ -252,17 +224,19 @@ export async function createResumableStreamValkeyStore(
   return {
     ...taggedStore,
     /**
-     * Closes all internally-created subscription clients. The main `client` passed in
+     * Closes the internally-created subscriber client. The main `client` passed in
      * `options` is **not** closed — the caller retains ownership of its lifecycle.
      */
     async close() {
-      for (const channel of pendingSubscriptions) {
-        cancelledSubscriptions.add(channel);
+      channelCallbacks.clear();
+      const pending = subscriberClient;
+      subscriberClient = null;
+      if (!pending) return;
+      try {
+        (await pending).close();
+      } catch {
+        // Creation failed, so there is no client to close.
       }
-      for (const subClient of subscriptionClients.values()) {
-        subClient.close();
-      }
-      subscriptionClients.clear();
     },
   };
 }
