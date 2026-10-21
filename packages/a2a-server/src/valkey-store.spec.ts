@@ -187,4 +187,17 @@ describe("createValkeyTaskStore", () => {
     const store = await createValkeyTaskStore({ client } as any);
     expect(store).toBeInstanceOf(ValkeyTaskStore);
   });
+
+  it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects ttlSeconds=%s",
+    async (ttlSeconds) => {
+      const client = makeClient();
+      await expect(createValkeyTaskStore({ client, ttlSeconds } as any)).rejects.toThrow(
+        "ttlSeconds must be a positive integer",
+      );
+      expect(() => new ValkeyTaskStore({ client, ttlSeconds } as any)).toThrow(
+        "ttlSeconds must be a positive integer",
+      );
+    },
+  );
 });

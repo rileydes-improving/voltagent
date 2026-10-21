@@ -12,7 +12,7 @@ export interface ValkeyTaskStoreOptions {
   client: GlideClient | GlideClusterClient;
   /** Key prefix for all task records stored in Valkey. Defaults to `"a2a-tasks"`. */
   keyPrefix?: string;
-  /** Optional TTL in seconds applied to every persisted task record. Must be a positive finite number. */
+  /** Optional TTL in seconds applied to every persisted task record. Must be a positive integer. */
   ttlSeconds?: number;
 }
 
@@ -28,7 +28,7 @@ const VALKEY_GLIDE_REQUIRED =
  *
  * @param options - Store configuration including the Valkey client, optional key prefix, and TTL.
  * @returns A fully initialised {@link ValkeyTaskStore} instance.
- * @throws If `ttlSeconds` is provided but is not a positive finite number.
+ * @throws If `ttlSeconds` is provided but is not a positive integer.
  * @throws If `@valkey/valkey-glide` is not installed when `ttlSeconds` is set.
  */
 export async function createValkeyTaskStore(
@@ -36,9 +36,9 @@ export async function createValkeyTaskStore(
 ): Promise<ValkeyTaskStore> {
   if (
     options.ttlSeconds !== undefined &&
-    (!Number.isFinite(options.ttlSeconds) || options.ttlSeconds <= 0)
+    (!Number.isInteger(options.ttlSeconds) || options.ttlSeconds <= 0)
   ) {
-    throw new Error("ttlSeconds must be a positive finite number");
+    throw new Error("ttlSeconds must be a positive integer");
   }
 
   let timeUnitSeconds: TimeUnit | undefined;
@@ -80,14 +80,14 @@ export class ValkeyTaskStore implements TaskStore {
    *
    * @param options - Store configuration.
    * @param timeUnitSeconds - Pre-resolved `TimeUnit.Seconds` value from `@valkey/valkey-glide`.
-   * @throws If `ttlSeconds` is provided but is not a positive finite number.
+   * @throws If `ttlSeconds` is provided but is not a positive integer.
    */
   constructor(options: ValkeyTaskStoreOptions, /** @internal */ timeUnitSeconds?: TimeUnit) {
     if (
       options.ttlSeconds !== undefined &&
-      (!Number.isFinite(options.ttlSeconds) || options.ttlSeconds <= 0)
+      (!Number.isInteger(options.ttlSeconds) || options.ttlSeconds <= 0)
     ) {
-      throw new Error("ttlSeconds must be a positive finite number");
+      throw new Error("ttlSeconds must be a positive integer");
     }
     this.client = options.client;
     this.keyPrefix = options.keyPrefix ?? "a2a-tasks";
