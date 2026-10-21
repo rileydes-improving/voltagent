@@ -176,6 +176,56 @@ describe("ValkeyResumableStreamStore — Subscriber adapter", () => {
     await subscriber.unsubscribe("test-channel");
     expect(mockSubClient.close).toHaveBeenCalledTimes(1);
   });
+
+  it("unsubscribe during a pending subscribe closes the client once it is created", async () => {
+    const { GlideClient } = await import("@valkey/valkey-glide");
+    const mockCreateClient = vi.mocked(GlideClient.createClient);
+    const lateClient = { close: vi.fn() };
+    let resolveCreate!: (client: any) => void;
+    mockCreateClient.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+
+    const { subscriber } = await getPublisher();
+    const pending = subscriber.subscribe("test-channel", vi.fn());
+    await subscriber.unsubscribe("test-channel");
+    resolveCreate(lateClient);
+    await pending;
+
+    expect(lateClient.close).toHaveBeenCalledTimes(1);
+
+    await subscriber.unsubscribe("test-channel");
+    expect(lateClient.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribe after a cancelled pending subscribe keeps the new client", async () => {
+    const { GlideClient } = await import("@valkey/valkey-glide");
+    const mockCreateClient = vi.mocked(GlideClient.createClient);
+    const lateClient = { close: vi.fn() };
+    const nextClient = { close: vi.fn() };
+    let resolveCreate!: (client: any) => void;
+    mockCreateClient
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(nextClient as any);
+
+    const { subscriber } = await getPublisher();
+    const pending = subscriber.subscribe("test-channel", vi.fn());
+    await subscriber.unsubscribe("test-channel");
+    resolveCreate(lateClient);
+    await pending;
+
+    await subscriber.subscribe("test-channel", vi.fn());
+    expect(nextClient.close).not.toHaveBeenCalled();
+
+    await subscriber.unsubscribe("test-channel");
+    expect(nextClient.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("ValkeyResumableStreamStore — factory", () => {
@@ -365,5 +415,32 @@ describe("ValkeyResumableStreamStore — factory", () => {
     await store.close();
     expect(mockSubClient1.close).toHaveBeenCalledTimes(1);
     expect(mockSubClient2.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("close() during a pending subscribe closes the client once it is created", async () => {
+    const { GlideClient } = await import("@valkey/valkey-glide");
+    const mockCreateClient = vi.mocked(GlideClient.createClient);
+    const lateClient = { close: vi.fn() };
+    let resolveCreate!: (client: any) => void;
+    mockCreateClient.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+
+    const store = await createResumableStreamValkeyStore(makeOptions() as any);
+    const { createResumableStreamContext } = await import("resumable-stream/generic");
+    const mockCtx = vi.mocked(createResumableStreamContext);
+    const callArgs = mockCtx.mock.calls[mockCtx.mock.calls.length - 1][0] as any;
+
+    const pending = callArgs.subscriber.subscribe("channel-1", vi.fn());
+    await store.close();
+    resolveCreate(lateClient);
+    await pending;
+
+    expect(lateClient.close).toHaveBeenCalledTimes(1);
+
+    await store.close();
+    expect(lateClient.close).toHaveBeenCalledTimes(1);
   });
 });

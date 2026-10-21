@@ -156,6 +156,8 @@ export async function createResumableStreamValkeyStore(
   const subscriptionClients = new Map<string, GlideClient | GlideClusterClient>();
   // Guard against concurrent subscribe calls interleaving across awaits.
   const pendingSubscriptions = new Set<string>();
+  // Pending channels cancelled by unsubscribe() or close() before their client was created.
+  const cancelledSubscriptions = new Set<string>();
 
   const subscriber = {
     async connect() {},
@@ -195,12 +197,20 @@ export async function createResumableStreamValkeyStore(
             ? await GlideClusterClientClass.createClient(pubsubConfig)
             : await GlideClientClass.createClient(pubsubConfig);
 
+        if (cancelledSubscriptions.has(channel)) {
+          subClient.close();
+          return;
+        }
         subscriptionClients.set(channel, subClient);
       } finally {
         pendingSubscriptions.delete(channel);
+        cancelledSubscriptions.delete(channel);
       }
     },
     async unsubscribe(channel: string) {
+      if (pendingSubscriptions.has(channel)) {
+        cancelledSubscriptions.add(channel);
+      }
       const subClient = subscriptionClients.get(channel);
       if (subClient) {
         subClient.close();
@@ -246,6 +256,9 @@ export async function createResumableStreamValkeyStore(
      * `options` is **not** closed — the caller retains ownership of its lifecycle.
      */
     async close() {
+      for (const channel of pendingSubscriptions) {
+        cancelledSubscriptions.add(channel);
+      }
       for (const subClient of subscriptionClients.values()) {
         subClient.close();
       }
