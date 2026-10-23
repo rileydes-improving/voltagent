@@ -3,9 +3,15 @@ import { TaskRecordSchema } from "./schemas";
 import type { TaskRecord } from "./types";
 import { ValkeyTaskStore, createValkeyTaskStore } from "./valkey-store";
 
+const timeUnitSecondsGetter = vi.fn(() => "EX");
+
 // Mock @valkey/valkey-glide so tests don't require the actual package
 vi.mock("@valkey/valkey-glide", () => ({
-  TimeUnit: { Seconds: "EX" },
+  TimeUnit: {
+    get Seconds() {
+      return timeUnitSecondsGetter();
+    },
+  },
 }));
 
 function makeClient() {
@@ -169,6 +175,30 @@ describe("ValkeyTaskStore", () => {
     expect(client.set).not.toHaveBeenCalled();
   });
 
+  it("save() generates a task ID when data.id is missing", async () => {
+    const client = makeClient();
+    client.set.mockResolvedValue("OK");
+    const record = makeTaskRecord({ id: undefined as any });
+
+    const store = new ValkeyTaskStore({ client, keyPrefix: "pfx" } as any);
+    await store.save({ agentId: "agent-1", data: record });
+
+    const [key, json] = client.set.mock.calls[0];
+    expect(key).toMatch(/^pfx:agent-1::[0-9a-f-]{36}$/);
+    expect(JSON.parse(json).id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("save() throws when safeStringify returns an error marker", async () => {
+    const client = makeClient();
+    const record = makeTaskRecord({ id: "task-bigint", metadata: { value: 1n as any } });
+
+    const store = new ValkeyTaskStore({ client } as any);
+    await expect(store.save({ agentId: "agent-1", data: record })).rejects.toThrow(
+      /Failed to serialize TaskRecord/,
+    );
+    expect(client.set).not.toHaveBeenCalled();
+  });
+
   it("exposes activeCancellations Set for task cancellation signaling", () => {
     const client = makeClient();
     const store = new ValkeyTaskStore({ client } as any);
@@ -193,10 +223,24 @@ describe("createValkeyTaskStore", () => {
     expect(options).toEqual({ expiry: { type: "EX", count: 60 } });
   });
 
-  it("returns a ValkeyTaskStore without resolving TimeUnit when no ttlSeconds", async () => {
+  it("resolves TimeUnit eagerly when ttlSeconds is set", async () => {
     const client = makeClient();
+    client.set.mockResolvedValue("OK");
+    timeUnitSecondsGetter.mockClear();
+
+    await createValkeyTaskStore({ client, ttlSeconds: 60 } as any);
+
+    expect(timeUnitSecondsGetter).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not resolve TimeUnit when no ttlSeconds", async () => {
+    const client = makeClient();
+    timeUnitSecondsGetter.mockClear();
+
     const store = await createValkeyTaskStore({ client } as any);
+
     expect(store).toBeInstanceOf(ValkeyTaskStore);
+    expect(timeUnitSecondsGetter).not.toHaveBeenCalled();
   });
 
   it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])(
