@@ -32,7 +32,7 @@ export const A2AMessageSchema = z.object({
   kind: z.literal("message"),
   role: z.enum(["user", "agent"]),
   messageId: z.string(),
-  parts: z.array(A2AMessagePartSchema),
+  parts: z.array(A2AMessagePartSchema).min(1),
   contextId: z.string().optional(),
   taskId: z.string().optional(),
   referenceTaskIds: z.array(z.string()).optional(),
