@@ -142,6 +142,7 @@ export async function createResumableStreamValkeyStore(
   const maxSubscriptions = options.maxSubscriptions ?? 1000;
   const channelCallbacks = new Map<string, (message: string) => void>();
   let subscriberClient: Promise<GlideClient | GlideClusterClient> | null = null;
+  let closed = false;
 
   const getSubscriberClient = () => {
     if (!subscriberClient) {
@@ -169,6 +170,7 @@ export async function createResumableStreamValkeyStore(
   const subscriber = {
     async connect() {},
     async subscribe(channel: string, callback: (message: string) => void) {
+      if (closed) return;
       if (!channelCallbacks.has(channel) && channelCallbacks.size >= maxSubscriptions) {
         throw new Error(
           `Maximum subscription limit (${maxSubscriptions}) reached. Unsubscribe from existing channels before subscribing to new ones.`,
@@ -228,6 +230,7 @@ export async function createResumableStreamValkeyStore(
      * `options` is **not** closed — the caller retains ownership of its lifecycle.
      */
     async close() {
+      closed = true;
       channelCallbacks.clear();
       const pending = subscriberClient;
       subscriberClient = null;

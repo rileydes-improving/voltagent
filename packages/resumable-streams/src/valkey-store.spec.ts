@@ -245,6 +245,26 @@ describe("ValkeyResumableStreamStore — Subscriber adapter", () => {
       "Maximum subscription limit (1) reached",
     );
   });
+
+  it("subscribe() after close() does not create or leak a new subscriber client", async () => {
+    const createClient = await mockCreateClient();
+    const subClient = makeSubClient();
+    createClient.mockResolvedValue(subClient as any);
+
+    const store = await createResumableStreamValkeyStore(makeOptions() as any);
+    const { createResumableStreamContext } = await import("resumable-stream/generic");
+    const mockCtx = vi.mocked(createResumableStreamContext);
+    const { subscriber } = mockCtx.mock.calls[mockCtx.mock.calls.length - 1][0] as any;
+
+    await subscriber.subscribe("channel-1", vi.fn());
+    await store.close();
+    expect(subClient.close).toHaveBeenCalledTimes(1);
+
+    createClient.mockClear();
+    await subscriber.subscribe("channel-2", vi.fn());
+
+    expect(createClient).not.toHaveBeenCalled();
+  });
 });
 
 describe("ValkeyResumableStreamStore — factory", () => {
