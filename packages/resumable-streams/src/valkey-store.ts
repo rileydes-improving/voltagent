@@ -190,9 +190,10 @@ export async function createResumableStreamValkeyStore(
       }
     },
     async unsubscribe(channel: string) {
-      if (!channelCallbacks.delete(channel) || !subscriberClient) return;
+      if (!channelCallbacks.has(channel) || !subscriberClient) return;
       const subClient = await subscriberClient;
       await subClient.unsubscribe(new Set([channel]), SUBSCRIBE_TIMEOUT_MS);
+      channelCallbacks.delete(channel);
     },
   };
 

@@ -255,6 +255,31 @@ describe("ValkeyResumableStreamStore — Subscriber adapter", () => {
     },
   );
 
+  it("retains the callback when unsubscribe fails so a retry can still remove it", async () => {
+    const createClient = await mockCreateClient();
+    const subClient = makeSubClient();
+    subClient.unsubscribe
+      .mockRejectedValueOnce(new Error("unsubscribe failed"))
+      .mockResolvedValueOnce(undefined);
+    createClient.mockResolvedValue(subClient as any);
+
+    const { subscriber } = await getPublisher();
+    const callback = vi.fn();
+    await subscriber.subscribe("test-channel", callback);
+
+    await expect(subscriber.unsubscribe("test-channel")).rejects.toThrow("unsubscribe failed");
+
+    const { callback: dispatch } = (createClient.mock.calls[0][0] as any).pubsubSubscriptions;
+    dispatch({ channel: "test-channel", message: "still-subscribed" }, null);
+    expect(callback).toHaveBeenCalledWith("still-subscribed");
+
+    await subscriber.unsubscribe("test-channel");
+    expect(subClient.unsubscribe).toHaveBeenCalledTimes(2);
+
+    dispatch({ channel: "test-channel", message: "late" }, null);
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   it("subscribe() after close() does not create or leak a new subscriber client", async () => {
     const createClient = await mockCreateClient();
     const subClient = makeSubClient();
