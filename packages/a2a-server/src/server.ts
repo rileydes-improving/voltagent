@@ -293,6 +293,8 @@ export class A2AServer {
     const abortController = new AbortController();
     this.registerActiveOperation(agentId, record.id, abortController);
 
+    let completedRecord: TaskRecord | undefined;
+
     try {
       const agentOptions = this.buildAgentCallOptions({
         record,
@@ -329,9 +331,7 @@ export class A2AServer {
         };
       }
 
-      await taskStore.save({ agentId, data: record });
-
-      return record;
+      completedRecord = record;
     } catch (error) {
       if (abortController.signal.aborted) {
         return await this.ensureCanceledRecord(agentId, record);
@@ -367,6 +367,9 @@ export class A2AServer {
     } finally {
       this.clearActiveOperation(agentId, record.id);
     }
+
+    await taskStore.save({ agentId, data: completedRecord });
+    return completedRecord;
   }
 
   private async handleMessageStream(
