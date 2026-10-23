@@ -728,11 +728,11 @@ export class A2AServer {
     }
     const candidate = payload as Record<string, unknown>;
 
-    try {
-      A2AMessageSchema.parse(candidate.message);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid message payload";
-      throw VoltA2AError.invalidParams(message);
+    const parsed = A2AMessageSchema.safeParse(candidate.message);
+    if (!parsed.success) {
+      throw VoltA2AError.invalidParams(
+        parsed.error.issues[0]?.message ?? "Invalid message payload",
+      );
     }
 
     return candidate as unknown as MessageSendParams;

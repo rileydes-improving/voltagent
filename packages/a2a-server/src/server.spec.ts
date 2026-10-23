@@ -413,6 +413,25 @@ describe("A2AServer", () => {
     expect(loaded?.status.state).toBe("working");
   });
 
+  it("returns a readable message for an invalid message/send payload instead of raw Zod issues", async () => {
+    const agent: StubAgent = {
+      id: "support-agent",
+      purpose: "Answer support questions",
+      generateText: vi.fn(),
+      streamText: vi.fn(),
+    };
+
+    const server = createServer(agent, new InMemoryTaskStore());
+    const response = (await server.handleRequest(
+      "support-agent",
+      createSendRequest({ parts: [] }),
+    )) as JsonRpcResponse<TaskRecord>;
+
+    expect(response.error?.code).toBe(-32602);
+    expect(response.error?.message).not.toMatch(/^\[/);
+    expect(response.error?.message).not.toContain('"code"');
+  });
+
   it("returns method not found for unknown requests", async () => {
     const agent: StubAgent = {
       id: "support-agent",
