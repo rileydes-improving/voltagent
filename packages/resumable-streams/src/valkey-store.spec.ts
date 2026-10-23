@@ -246,6 +246,15 @@ describe("ValkeyResumableStreamStore — Subscriber adapter", () => {
     );
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 0.5])(
+    "rejects maxSubscriptions=%s",
+    async (maxSubscriptions) => {
+      await expect(
+        createResumableStreamValkeyStore({ ...makeOptions(), maxSubscriptions } as any),
+      ).rejects.toThrow("maxSubscriptions must be a non-negative integer");
+    },
+  );
+
   it("subscribe() after close() does not create or leak a new subscriber client", async () => {
     const createClient = await mockCreateClient();
     const subClient = makeSubClient();

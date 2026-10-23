@@ -140,6 +140,9 @@ export async function createResumableStreamValkeyStore(
     GlideClusterClientClass !== undefined && client instanceof GlideClusterClientClass;
 
   const maxSubscriptions = options.maxSubscriptions ?? 1000;
+  if (!Number.isInteger(maxSubscriptions) || maxSubscriptions < 0) {
+    throw new Error("maxSubscriptions must be a non-negative integer");
+  }
   const channelCallbacks = new Map<string, (message: string) => void>();
   let subscriberClient: Promise<GlideClient | GlideClusterClient> | null = null;
   let closed = false;
