@@ -216,7 +216,7 @@ export type A2AErrorCode = (typeof A2AErrorCode)[keyof typeof A2AErrorCode];
 /**
  * Typed error class for A2A JSON-RPC failures.
  *
- * Provides static factory methods for every standard error code so callers
+ * Provides static factory methods for the error codes the server emits so callers
  * never need to remember numeric codes.
  */
 export class VoltA2AError extends Error {
