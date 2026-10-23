@@ -158,6 +158,17 @@ describe("ValkeyTaskStore", () => {
     await expect(store.save({ agentId: "agent-1", data: record })).rejects.toThrow("write timeout");
   });
 
+  it("save() rejects a record that fails TaskRecordSchema validation instead of persisting it", async () => {
+    const client = makeClient();
+    const record = makeTaskRecord({ id: "task-bad", metadata: "not-an-object" as any });
+
+    const store = new ValkeyTaskStore({ client } as any);
+    await expect(store.save({ agentId: "agent-1", data: record })).rejects.toThrow(
+      /Invalid TaskRecord/,
+    );
+    expect(client.set).not.toHaveBeenCalled();
+  });
+
   it("exposes activeCancellations Set for task cancellation signaling", () => {
     const client = makeClient();
     const store = new ValkeyTaskStore({ client } as any);

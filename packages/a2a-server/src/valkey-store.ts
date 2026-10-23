@@ -158,8 +158,16 @@ export class ValkeyTaskStore implements TaskStore {
     const taskId = params.data.id ?? randomUUID();
     const normalized: TaskRecord =
       taskId === params.data.id ? params.data : { ...params.data, id: taskId };
+
+    const validation = TaskRecordSchema.safeParse(normalized);
+    if (!validation.success) {
+      throw new Error(
+        `Invalid TaskRecord for agent "${params.agentId}", task "${taskId}": ${safeStringify(validation.error.issues)}`,
+      );
+    }
+
     const key = this.makeKey(params.agentId, taskId);
-    const json = safeStringify(normalized);
+    const json = safeStringify(validation.data);
 
     if (json.startsWith("SAFE_STRINGIFY_ERROR:")) {
       throw new Error(
