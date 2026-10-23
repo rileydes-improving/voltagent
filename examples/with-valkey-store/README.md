@@ -125,6 +125,7 @@ Both stores accept `GlideClient` or `GlideClusterClient`:
 
 ```typescript
 import { GlideClusterClient } from "@valkey/valkey-glide";
+import { createValkeyTaskStore } from "@voltagent/a2a-server/valkey-store";
 
 const clusterClient = await GlideClusterClient.createClient({
   addresses: [
@@ -135,7 +136,7 @@ const clusterClient = await GlideClusterClient.createClient({
   clientInfoTag: "voltagent",
 });
 
-const taskStore = new ValkeyTaskStore({ client: clusterClient });
+const taskStore = await createValkeyTaskStore({ client: clusterClient });
 ```
 
 ## Try it
