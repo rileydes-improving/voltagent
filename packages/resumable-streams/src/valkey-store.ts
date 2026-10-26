@@ -44,7 +44,7 @@ export interface ResumableStreamValkeyStoreOptions {
   ttlSeconds?: number;
   /**
    * Maximum number of concurrent subscription channels. All channels share one subscriber
-   * connection. Defaults to 1000.
+   * connection. Must be a non-negative integer. Defaults to 1000.
    */
   maxSubscriptions?: number;
   /** Optional callback (e.g. from a serverless runtime) to keep the process alive while background work completes. */
@@ -73,6 +73,7 @@ export type ValkeyResumableStreamStore = ResumableStreamStore &
  * @returns A {@link ValkeyResumableStreamStore} ready for use.
  * @throws If `@valkey/valkey-glide` is not installed.
  * @throws If `ttlSeconds` is provided but is not a positive integer.
+ * @throws If `maxSubscriptions` is provided but is not a non-negative integer.
  */
 export async function createResumableStreamValkeyStore(
   options: ResumableStreamValkeyStoreOptions,
