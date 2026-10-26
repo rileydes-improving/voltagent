@@ -147,12 +147,12 @@ export class ValkeyTaskStore implements TaskStore {
    * composite key derived from the agent ID and the record's task ID. When
    * `ttlSeconds` is configured the key is set with an expiry.
    *
-   * Note: unlike {@link load}, `save` does **not** run Zod validation. The
-   * caller is trusted to supply a well-typed `TaskRecord`, and skipping
-   * validation on the write path avoids the per-call overhead. Any schema
-   * drift will surface on the next `load()`.
+   * Note: like {@link load}, `save` validates the record against
+   * `TaskRecordSchema` and throws on an invalid record instead of writing it.
+   * Streaming calls `save` on every update, so this runs once per chunk.
    *
    * @param params - The agent ID and the {@link TaskRecord} to persist.
+   * @throws If the record fails `TaskRecordSchema` validation or cannot be serialised.
    */
   async save(params: { agentId: string; data: TaskRecord }): Promise<void> {
     const taskId = params.data.id ?? randomUUID();
