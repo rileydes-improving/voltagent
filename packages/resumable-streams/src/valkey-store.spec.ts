@@ -280,6 +280,28 @@ describe("ValkeyResumableStreamStore — Subscriber adapter", () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  it("unsubscribe keeps a callback re-registered while UNSUBSCRIBE is pending", async () => {
+    const createClient = await mockCreateClient();
+    const subClient = makeSubClient();
+    const unsub = deferred<undefined>();
+    subClient.unsubscribe.mockReturnValueOnce(unsub.promise);
+    createClient.mockResolvedValue(subClient as any);
+
+    const { subscriber } = await getPublisher();
+    await subscriber.subscribe("test-channel", vi.fn());
+    const cancel = subscriber.unsubscribe("test-channel");
+    await vi.waitFor(() => expect(subClient.unsubscribe).toHaveBeenCalled());
+
+    const resubscribed = vi.fn();
+    await subscriber.subscribe("test-channel", resubscribed);
+    unsub.resolve(undefined);
+    await cancel;
+
+    const { callback: dispatch } = (createClient.mock.calls[0][0] as any).pubsubSubscriptions;
+    dispatch({ channel: "test-channel", message: "after-resubscribe" }, null);
+    expect(resubscribed).toHaveBeenCalledWith("after-resubscribe");
+  });
+
   it("subscribe() after close() does not create or leak a new subscriber client", async () => {
     const createClient = await mockCreateClient();
     const subClient = makeSubClient();
